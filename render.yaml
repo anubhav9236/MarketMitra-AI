@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: localbiz-ai-demo
+    runtime: python
+    plan: free
+    region: oregon
+    buildCommand: pip install -r requirements.txt
+    startCommand: waitress-serve --listen=0.0.0.0:$PORT app:app
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.14
+      - key: DEMO_MODE_ONLY
+        value: "true"
+      - key: SECRET_KEY
+        generateValue: true

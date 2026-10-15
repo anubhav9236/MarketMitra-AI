@@ -1,433 +1,343 @@
-# -*- coding: utf-8 -*-
-"""
-LocalBiz AI – Social Media Post Generator
-Flask backend with Ollama integration.
-"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LocalBiz AI – Social Media Post Generator</title>
+  <meta name="description"
+        content="Generate professional social media posts for your small business using locally running AI. Free, private, and works in Hindi, English, and Hinglish." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;600;700;800&display=swap"
+        rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body data-demo-mode-only="{{ 'true' if demo_mode_only else 'false' }}">
 
-import os
-import json
-import time
-import logging
-import requests
-from flask import Flask, render_template, request, jsonify, send_file
-from datetime import datetime
-import io
-from werkzeug.utils import secure_filename
+<!-- ══════════════════════════ HEADER ══════════════════════════ -->
+<header class="site-header">
+  <div class="header-inner">
+    <div class="logo-group">
+      <div class="logo-icon">🤖</div>
+      <div>
+        <h1 class="site-title">LocalBiz AI</h1>
+        <p class="site-subtitle">Social Media Post Generator</p>
+      </div>
+    </div>
+    <div class="header-meta">
+      <span class="badge badge-local">{{ '🧪 Public Demo' if demo_mode_only else '🔒 100% Local AI' }}</span>
+      <div id="ollama-status" class="status-dot status-checking" title="Checking Ollama…"></div>
+    </div>
+  </div>
+</header>
 
-# ---------------------------------------------------------------------------
-# App configuration
-# ---------------------------------------------------------------------------
+<!-- ══════════════════════════ HERO BANNER ══════════════════════════ -->
+<section class="hero">
+  <div class="hero-content">
+    <p class="hero-tagline">
+      {% if demo_mode_only %}
+      Public demo · Sample content only
+      {% else %}
+      Powered by <strong>Ollama</strong> · Running <span class="model-pill" id="model-name-badge">{{ model }}</span>
+      {% endif %}
+    </p>
+    <p class="hero-desc">
+      {% if demo_mode_only %}
+      Try sample captions, hashtags &amp; WhatsApp messages for your business in Hindi, English, or Hinglish.
+      This public demo does not run an AI model.
+      {% else %}
+      Create stunning captions, hashtags &amp; WhatsApp messages for your business —
+      in Hindi, English, or Hinglish — without sending data to any cloud.
+      {% endif %}
+    </p>
+  </div>
+</section>
 
-app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "localbiz-ai-secret-2024")
+<!-- ══════════════════════════ DEMO BANNER ══════════════════════════ -->
+<div id="demo-banner" class="demo-banner hidden">
+  <span>🧪</span>
+  <span><strong>Demo Mode is ON</strong> — {% if demo_mode_only %}This public demo shows sample output; AI is disabled.{% else %}Showing sample output. Ollama not required.{% endif %} {% if not demo_mode_only %}<button id="demo-off-btn" class="link-btn">Turn Off</button>{% endif %}</span>
+</div>
 
-# Ollama configuration – change OLLAMA_MODEL to any model you have pulled
-OLLAMA_HOST  = os.environ.get("OLLAMA_HOST",  "http://localhost:11434")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2:3b")
-OLLAMA_TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "120"))
-RESPONSE_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "caption": {"type": "string"},
-        "short_description": {"type": "string"},
-        "hashtags": {"type": "string"},
-        "call_to_action": {"type": "string"},
-        "whatsapp_message": {"type": "string"},
-    },
-    "required": [
-        "caption",
-        "short_description",
-        "hashtags",
-        "call_to_action",
-        "whatsapp_message",
-    ],
-    "additionalProperties": False,
-}
+<!-- ══════════════════════════ OLLAMA ERROR CARD ══════════════════════════ -->
+<div id="ollama-error-card" class="setup-card hidden">
+  <div class="setup-card-inner">
+    <div class="setup-icon">⚠️</div>
+    <div>
+      <h2>Ollama Not Detected</h2>
+      <p>LocalBiz AI needs a locally running Ollama instance. Follow these steps:</p>
+      <ol class="setup-steps" id="setup-steps-list">
+        <li>Download Ollama from <a href="https://ollama.com/download" target="_blank">ollama.com/download</a></li>
+        <li>Open a terminal and run: <code>ollama pull {{ model }}</code></li>
+        <li>Start Ollama: <code>ollama serve</code></li>
+        <li>Refresh this page</li>
+      </ol>
+      <div class="setup-actions">
+        <button class="btn btn-secondary" id="use-demo-btn">Use Demo Mode Instead</button>
+        <button class="btn btn-outline" id="retry-health-btn">Retry Connection</button>
+      </div>
+    </div>
+  </div>
+</div>
 
-logging.basicConfig(level=logging.INFO,
-                    format="%(asctime)s [%(levelname)s] %(message)s")
-logger = logging.getLogger(__name__)
+<!-- ══════════════════════════ MAIN LAYOUT ══════════════════════════ -->
+<main class="main-layout">
 
+  <!-- ─────── LEFT COLUMN: INPUT FORM ─────── -->
+  <section class="form-card" aria-label="Business input form">
+    <div class="card-header">
+      <span class="card-icon">📋</span>
+      <h2 class="card-title">Your Business Details</h2>
+    </div>
 
-# ---------------------------------------------------------------------------
-# Prompt builder
-# ---------------------------------------------------------------------------
+    <form id="biz-form" novalidate>
 
-def build_prompt(data: dict) -> str:
-    business_name   = _get_text(data, "business_name")
-    product_name    = _get_text(data, "product_name")
-    description     = _get_text(data, "description")
-    price           = _get_text(data, "price")
-    target_audience = _get_text(data, "target_audience")
-    platform        = _get_text(data, "platform", "Instagram")
-    language        = _get_text(data, "language", "English")
-    tone            = _get_text(data, "tone", "Professional")
-    cta             = _get_text(data, "cta")
+      <!-- Business Name -->
+      <div class="field-group">
+        <label for="business_name" class="field-label">
+          Business Name <span class="required">*</span>
+        </label>
+        <input type="text" id="business_name" name="business_name"
+               class="field-input" placeholder="e.g. Sharma General Store"
+               maxlength="100" autocomplete="organization" />
+        <span class="field-error" id="err-business_name"></span>
+      </div>
 
-    price_line = f"Price: {price}" if price else "Price: Not specified"
-    cta_line   = (f"Call to action preferred by the owner: {cta}"
-                  if cta else "Call to action: Generate a suitable one.")
+      <!-- Product / Service -->
+      <div class="field-group">
+        <label for="product_name" class="field-label">
+          Product / Service Name <span class="required">*</span>
+        </label>
+        <input type="text" id="product_name" name="product_name"
+               class="field-input" placeholder="e.g. Homemade Pickle, Logo Design"
+               maxlength="100" />
+        <span class="field-error" id="err-product_name"></span>
+      </div>
 
-    lang_instruction = {
-        "Hindi":    "Write EVERYTHING in Hindi (Devanagari script). Only JSON keys in English.",
-        "Hinglish": "Write EVERYTHING in Hinglish (mix of Hindi and English). Only JSON keys in English.",
-        "English":  "Write everything in clear, natural English.",
-    }.get(language, "Write everything in clear, natural English.")
+      <!-- Description -->
+      <div class="field-group">
+        <label for="description" class="field-label">
+          Product Description <span class="required">*</span>
+        </label>
+        <textarea id="description" name="description" class="field-input field-textarea"
+                  rows="3" maxlength="500"
+                  placeholder="Describe what makes your product special…"></textarea>
+        <div class="field-hint-row">
+          <span class="field-error" id="err-description"></span>
+          <span class="char-count" id="desc-count">0 / 500</span>
+        </div>
+      </div>
 
-    tone_desc = {
-        "Professional": "formal, polished, and business-like",
-        "Friendly":     "warm, conversational, and approachable",
-        "Promotional":  "exciting, persuasive, and sales-focused",
-    }.get(tone, "professional")
+      <!-- Price -->
+      <div class="field-group">
+        <label for="price" class="field-label">Price <span class="optional">(optional)</span></label>
+        <input type="text" id="price" name="price" class="field-input"
+               placeholder="e.g. ₹199, Free, Starting at ₹500" maxlength="50" />
+      </div>
 
-    platform_note = {
-        "Instagram": "Instagram (use emojis, 2200-char limit, hashtag-friendly)",
-        "Facebook":  "Facebook (slightly longer, story-driven, community focus)",
-        "WhatsApp":  "WhatsApp (concise, personal, short paragraphs)",
-    }.get(platform, platform)
+      <!-- Target Audience -->
+      <div class="field-group">
+        <label for="target_audience" class="field-label">
+          Target Audience <span class="required">*</span>
+        </label>
+        <input type="text" id="target_audience" name="target_audience"
+               class="field-input" placeholder="e.g. Housewives, College Students, Local Shopkeepers"
+               maxlength="100" />
+        <span class="field-error" id="err-target_audience"></span>
+      </div>
 
-    prompt = f"""You are an expert social media copywriter for small businesses in India.
-A business owner has given you the following information. Create compelling promotional content for their {platform_note} page.
+      <!-- Row: Platform + Language -->
+      <div class="field-row">
+        <div class="field-group">
+          <label for="platform" class="field-label">Platform</label>
+          <select id="platform" name="platform" class="field-input field-select">
+            <option value="Instagram">📸 Instagram</option>
+            <option value="Facebook">👥 Facebook</option>
+            <option value="WhatsApp">💬 WhatsApp</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label for="language" class="field-label">Language</label>
+          <select id="language" name="language" class="field-input field-select">
+            <option value="English">🇬🇧 English</option>
+            <option value="Hindi">🇮🇳 Hindi</option>
+            <option value="Hinglish">🔀 Hinglish</option>
+          </select>
+        </div>
+      </div>
 
---- BUSINESS DETAILS ---
-Business Name   : {business_name}
-Product/Service : {product_name}
-Description     : {description}
-{price_line}
-Target Audience : {target_audience}
-Tone            : {tone_desc}
-{cta_line}
-Language        : {language}
-{lang_instruction}
+      <!-- Tone -->
+      <div class="field-group">
+        <label class="field-label">Tone</label>
+        <div class="tone-selector" role="radiogroup" aria-label="Select tone">
+          <label class="tone-option">
+            <input type="radio" name="tone" value="Professional" checked />
+            <span class="tone-pill">💼 Professional</span>
+          </label>
+          <label class="tone-option">
+            <input type="radio" name="tone" value="Friendly" />
+            <span class="tone-pill">😊 Friendly</span>
+          </label>
+          <label class="tone-option">
+            <input type="radio" name="tone" value="Promotional" />
+            <span class="tone-pill">🔥 Promotional</span>
+          </label>
+        </div>
+      </div>
 
---- YOUR TASK ---
-Return ONLY a valid JSON object (no markdown, no extra text, no code fences).
-Use exactly these keys:
+      <!-- CTA -->
+      <div class="field-group">
+        <label for="cta" class="field-label">Call to Action <span class="optional">(optional)</span></label>
+        <input type="text" id="cta" name="cta" class="field-input"
+               placeholder='e.g. "Visit our shop", "Call now", "DM to order"'
+               maxlength="100" />
+      </div>
 
-{{
-  "caption": "<An attractive {platform} promotional caption with emojis where appropriate>",
-  "short_description": "<A short 2-3 sentence product/service description>",
-  "hashtags": "<10-15 relevant hashtags separated by spaces>",
-  "call_to_action": "<A punchy one-liner call to action>",
-  "whatsapp_message": "<A short WhatsApp promotional message under 300 characters>"
-}}
+      <!-- Submit Buttons -->
+      <div class="form-actions">
+        <button type="submit" id="generate-btn" class="btn btn-primary">
+          <span class="btn-icon">✨</span>
+          <span class="btn-text">{{ 'Generate Demo' if demo_mode_only else 'Generate with AI' }}</span>
+        </button>
+        <button type="button" id="demo-mode-btn" class="btn btn-demo">
+          🧪 Demo Mode
+        </button>
+      </div>
 
-Rules:
-- Never add any text outside the JSON.
-- Do not wrap the JSON in markdown code fences.
-- All values must be non-empty strings.
-- Hashtags must start with #.
-- WhatsApp message must be under 300 characters.
-"""
-    return prompt
+    </form>
+  </section>
 
+  <!-- ─────── RIGHT COLUMN: RESULTS ─────── -->
+  <section class="results-panel" aria-label="Generated content" aria-live="polite">
 
-def _get_text(data: dict, key: str, default: str = "") -> str:
-    value = data.get(key, default)
-    return value.strip() if isinstance(value, str) else default
+    <!-- Empty state -->
+    <div id="empty-state" class="empty-state">
+      <div class="empty-icon">🚀</div>
+      <h3>Your content will appear here</h3>
+      <p>Fill in your business details and click <strong>Generate with AI</strong>.</p>
+      <p class="empty-hint">No internet required · No API key needed · 100% private</p>
+    </div>
 
+    <!-- Loading -->
+    <div id="loading-state" class="loading-state hidden">
+      <div class="spinner"></div>
+      <p class="loading-text">AI is crafting your content…</p>
+      <p class="loading-sub" id="loading-model-text">Using model: {{ model }}</p>
+      <div class="loading-dots">
+        <span></span><span></span><span></span>
+      </div>
+    </div>
 
-# ---------------------------------------------------------------------------
-# Ollama helper
-# ---------------------------------------------------------------------------
+    <!-- Error state -->
+    <div id="error-state" class="error-state hidden">
+      <div class="error-icon">❌</div>
+      <h3 id="error-title">Something went wrong</h3>
+      <p id="error-message"></p>
+      <ol id="error-steps" class="setup-steps hidden"></ol>
+      <div class="error-actions">
+        <button class="btn btn-secondary" id="retry-btn">🔄 Retry</button>
+        <button class="btn btn-outline" id="use-demo-btn-2">🧪 Use Demo Mode</button>
+      </div>
+    </div>
 
-def call_ollama(prompt: str) -> dict:
-    url = f"{OLLAMA_HOST}/api/generate"
-    payload = {
-        "model":  OLLAMA_MODEL,
-        "prompt": prompt,
-        "format": RESPONSE_SCHEMA,
-        "stream": False,
-        "options": {
-            "temperature": 0.4,
-            "top_p":       0.9,
-            "num_predict": 900,
-        },
-    }
+    <!-- Results -->
+    <div id="results-state" class="results-state hidden">
 
-    try:
-        resp = requests.post(url, json=payload, timeout=OLLAMA_TIMEOUT)
-        resp.raise_for_status()
-    except requests.exceptions.ConnectionError:
-        raise ConnectionError(
-            f"Cannot connect to Ollama at {OLLAMA_HOST}. Make sure Ollama is running. Run: ollama serve"
-        )
-    except requests.exceptions.Timeout:
-        raise TimeoutError(
-            "Ollama took too long to respond. The model may still be loading. Please wait and try again."
-        )
-    except requests.exceptions.HTTPError as e:
-        if resp.status_code == 404:
-            raise ValueError(f"Model '{OLLAMA_MODEL}' not found. Run: ollama pull {OLLAMA_MODEL}")
-        raise ValueError(f"Ollama returned an error: {e}")
+      <!-- Meta bar -->
+      <div class="result-meta-bar">
+        <div class="result-meta-chips" id="result-chips"></div>
+        <div class="result-actions-top">
+          <button class="btn btn-sm btn-outline" id="regenerate-btn" title="Regenerate">
+            🔄 Regenerate
+          </button>
+          <button class="btn btn-sm btn-primary" id="download-btn" title="Download as .txt">
+            ⬇️ Download
+          </button>
+        </div>
+      </div>
 
-    try:
-        response_body = resp.json()
-    except ValueError as e:
-        raise ValueError("Ollama returned an invalid JSON response.") from e
-    if not isinstance(response_body, dict):
-        raise ValueError("Ollama returned an invalid response.")
+      <!-- Demo badge -->
+      <div id="demo-result-badge" class="demo-result-badge hidden">
+        🧪 Demo Output — {% if demo_mode_only %}Sample output only; AI is disabled on this public demo.{% else %}Enable Ollama for real AI-generated content.{% endif %}
+      </div>
 
-    raw_response = response_body.get("response")
-    if not isinstance(raw_response, str) or not raw_response.strip():
-        raise ValueError("Ollama returned an empty response. Try regenerating.")
-    raw_text = raw_response.strip()
-    logger.info("Raw Ollama response (first 300 chars): %s", raw_text[:300])
+      <!-- Elapsed time -->
+      <div id="elapsed-badge" class="elapsed-badge hidden"></div>
 
-    # Strip markdown code fences if the model added them
-    if raw_text.startswith("```"):
-        lines = raw_text.splitlines()
-        lines = [l for l in lines if not l.strip().startswith("```")]
-        raw_text = "\n".join(lines).strip()
+      <!-- Caption -->
+      <div class="result-card" id="card-caption">
+        <div class="result-card-header">
+          <span>📸 Caption</span>
+          <button class="copy-btn" data-target="caption-text" title="Copy caption">
+            <span class="copy-icon">📋</span> Copy
+          </button>
+        </div>
+        <pre class="result-text" id="caption-text"></pre>
+      </div>
 
-    try:
-        parsed = json.loads(raw_text)
-    except json.JSONDecodeError:
-        start = raw_text.find("{")
-        end   = raw_text.rfind("}") + 1
-        if start != -1 and end > start:
-            try:
-                parsed = json.loads(raw_text[start:end])
-            except json.JSONDecodeError:
-                raise ValueError("The AI model did not return valid JSON. Try regenerating or use a different model.")
-        else:
-            raise ValueError("The AI model did not return valid JSON. Try regenerating or use a different model.")
+      <!-- Short Description -->
+      <div class="result-card" id="card-short-desc">
+        <div class="result-card-header">
+          <span>📝 Short Description</span>
+          <button class="copy-btn" data-target="short-desc-text" title="Copy description">
+            <span class="copy-icon">📋</span> Copy
+          </button>
+        </div>
+        <p class="result-text" id="short-desc-text"></p>
+      </div>
 
-    if not isinstance(parsed, dict):
-        raise ValueError("The AI model response must be a JSON object. Try regenerating.")
+      <!-- Hashtags -->
+      <div class="result-card" id="card-hashtags">
+        <div class="result-card-header">
+          <span>🏷️ Hashtags</span>
+          <button class="copy-btn" data-target="hashtags-text" title="Copy hashtags">
+            <span class="copy-icon">📋</span> Copy
+          </button>
+        </div>
+        <div class="hashtag-cloud" id="hashtags-text"></div>
+      </div>
 
-    required_keys = ["caption", "short_description", "hashtags", "call_to_action", "whatsapp_message"]
-    missing = [k for k in required_keys if k not in parsed]
-    if missing:
-        raise ValueError(f"AI response is missing fields: {missing}. Try regenerating.")
-    invalid = [k for k in required_keys if not isinstance(parsed[k], str) or not parsed[k].strip()]
-    if invalid:
-        raise ValueError(f"AI response has empty or invalid fields: {invalid}. Try regenerating.")
+      <!-- CTA -->
+      <div class="result-card" id="card-cta">
+        <div class="result-card-header">
+          <span>📣 Call to Action</span>
+          <button class="copy-btn" data-target="cta-text" title="Copy CTA">
+            <span class="copy-icon">📋</span> Copy
+          </button>
+        </div>
+        <p class="result-text cta-text" id="cta-text"></p>
+      </div>
 
-    return parsed
+      <!-- WhatsApp Message -->
+      <div class="result-card" id="card-whatsapp">
+        <div class="result-card-header">
+          <span>💬 WhatsApp Message</span>
+          <button class="copy-btn" data-target="whatsapp-text" title="Copy WhatsApp message">
+            <span class="copy-icon">📋</span> Copy
+          </button>
+        </div>
+        <p class="result-text whatsapp-text" id="whatsapp-text"></p>
+      </div>
 
+    </div><!-- /results-state -->
+  </section>
 
-# ---------------------------------------------------------------------------
-# Demo mode
-# ---------------------------------------------------------------------------
+</main>
 
-DEMO_RESPONSES = {
-    "English": {
-        "caption": "✨ Introducing {product_name} by {business_name}! 🚀\n\n{description}\n\nPerfect for {target_audience}. Don't miss out on this incredible opportunity! 💯\n\n#SmallBusiness #LocalBusiness #NewProduct",
-        "short_description": "{product_name} by {business_name} is designed specifically for {target_audience}. {description} Experience quality you can trust at an unbeatable price.",
-        "hashtags": "#SmallBusiness #LocalBusiness #SupportLocal #NewLaunch #MadeInIndia #ShopLocal #BestDeals #QualityFirst #CustomerFirst #IndianBusiness #ShopNow #Trending",
-        "call_to_action": "Order now and get it delivered to your doorstep! 📦",
-        "whatsapp_message": "Hi! 👋 Check out {product_name} from {business_name}. Great for {target_audience}. Contact us to order today! 🛒",
-    },
-    "Hindi": {
-        "caption": "✨ {business_name} की तरफ से लाइए {product_name}! 🚀\n\n{description}\n\n{target_audience} के लिए एकदम सही! अभी ऑर्डर करें! 💯",
-        "short_description": "{business_name} का {product_name} {target_audience} के लिए खास बनाया गया है। {description} उत्कृष्ट गुणवत्ता का अनुभव करें।",
-        "hashtags": "#लोकलबिज़नेस #भारतीयव्यापार #नयाउत्पाद #मेडइनइंडिया #सपोर्टलोकल #शॉपलोकल #बेस्टडील #गुणवत्ता #ग्राहकसेवा #भारत #शॉपनाउ",
-        "call_to_action": "अभी ऑर्डर करें और घर पर पाएं! 📦",
-        "whatsapp_message": "नमस्ते! 👋 {business_name} से {product_name} देखें। {target_audience} के लिए बढ़िया। आज ही ऑर्डर करें! 🛒",
-    },
-    "Hinglish": {
-        "caption": "✨ {business_name} ka {product_name} aa gaya! 🚀\n\n{description}\n\n{target_audience} ke liye bilkul perfect! Abhi order karo! 💯",
-        "short_description": "{business_name} ka {product_name} {target_audience} ke liye specially banaya gaya hai. {description} Ekdum zabardast quality!",
-        "hashtags": "#LocalBusiness #DesiStyle #NewLaunch #MadeInIndia #SupportLocal #BestDeal #ZabardastOffer #Desi #IndianBrand #ShopNow #Trending #MustBuy",
-        "call_to_action": "Abhi order karo aur ghar pe pao! 📦",
-        "whatsapp_message": "Arre yaar! 👋 {business_name} ka {product_name} dekho. {target_audience} ke liye best hai. Aaj hi order karo! 🛒",
-    },
-}
+<!-- ══════════════════════════ FOOTER ══════════════════════════ -->
+<footer class="site-footer">
+  <div class="footer-inner">
+    <span>🤖 LocalBiz AI &mdash; Open Source · Hacktoberfest 2024</span>
+    <span class="footer-links">
+      <a href="https://ollama.com" target="_blank">Ollama</a> ·
+      <a href="https://github.com/your-username/LocalBiz-AI" target="_blank">GitHub</a>
+    </span>
+  </div>
+</footer>
 
+<!-- Toast notification -->
+<div id="toast" class="toast hidden" role="alert" aria-live="assertive"></div>
 
-def get_demo_response(data: dict) -> dict:
-    language = _get_text(data, "language", "English")
-    template = DEMO_RESPONSES.get(language, DEMO_RESPONSES["English"])
-    fmt = {
-        "business_name":   _get_text(data, "business_name", "Your Business"),
-        "product_name":    _get_text(data, "product_name", "Our Product"),
-        "description":     _get_text(data, "description", "Amazing product for you"),
-        "target_audience": _get_text(data, "target_audience", "everyone"),
-    }
-    return {key: val.format(**fmt) for key, val in template.items()}
-
-
-# ---------------------------------------------------------------------------
-# Routes
-# ---------------------------------------------------------------------------
-
-@app.route("/")
-def index():
-    return render_template("index.html", model=OLLAMA_MODEL, ollama_host=OLLAMA_HOST)
-
-
-@app.route("/health")
-def health():
-    try:
-        resp = requests.get(f"{OLLAMA_HOST}/api/tags", timeout=5)
-        resp.raise_for_status()
-        body = resp.json()
-        if not isinstance(body, dict):
-            raise ValueError("Ollama returned an invalid tags response.")
-        model_entries = body.get("models", [])
-        if not isinstance(model_entries, list):
-            raise ValueError("Ollama returned an invalid models list.")
-        models = [
-            model["name"] for model in model_entries
-            if isinstance(model, dict) and isinstance(model.get("name"), str)
-        ]
-        model_ready = any(
-            name == OLLAMA_MODEL
-            or (":" not in OLLAMA_MODEL and name.startswith(f"{OLLAMA_MODEL}:"))
-            for name in models
-        )
-        return jsonify({
-            "ollama_running":   True,
-            "model_available":  model_ready,
-            "model_name":       OLLAMA_MODEL,
-            "available_models": models,
-        })
-    except (requests.exceptions.RequestException, ValueError) as e:
-        logger.warning("Ollama health check failed: %s", e)
-        return jsonify({
-            "ollama_running":   False,
-            "model_available":  False,
-            "model_name":       OLLAMA_MODEL,
-            "available_models": [],
-        })
-
-
-@app.route("/generate", methods=["POST"])
-def generate():
-    data = request.get_json(silent=True)
-    if not isinstance(data, dict):
-        return jsonify({"success": False, "error": "Request body must be a JSON object."}), 400
-    demo_mode = data.get("demo_mode") is True
-
-    # Input validation
-    errors = {}
-    required_fields = {
-        "business_name": "Business name is required.",
-        "product_name": "Product / service name is required.",
-        "description": "Product description is required.",
-        "target_audience": "Target audience is required.",
-    }
-    for field, message in required_fields.items():
-        if not _get_text(data, field):
-            errors[field] = message
-
-    if errors:
-        return jsonify({"success": False, "errors": errors}), 422
-
-    if demo_mode:
-        logger.info("Demo mode request.")
-        result = get_demo_response(data)
-        return jsonify({"success": True, "result": result, "demo": True})
-
-    prompt = build_prompt(data)
-    logger.info("Sending prompt to Ollama model: %s", OLLAMA_MODEL)
-    start = time.time()
-
-    try:
-        result  = call_ollama(prompt)
-        elapsed = round(time.time() - start, 2)
-        logger.info("Generation complete in %ss", elapsed)
-        return jsonify({"success": True, "result": result, "elapsed": elapsed, "demo": False})
-
-    except ConnectionError as e:
-        return jsonify({
-            "success": False, "error": str(e), "error_type": "connection",
-            "setup_steps": [
-                "1. Download Ollama from https://ollama.com/download",
-                f"2. Run: ollama pull {OLLAMA_MODEL}",
-                "3. Start Ollama: ollama serve",
-                "4. Refresh this page and try again",
-            ],
-        }), 503
-
-    except TimeoutError as e:
-        return jsonify({"success": False, "error": str(e), "error_type": "timeout"}), 504
-
-    except ValueError as e:
-        return jsonify({"success": False, "error": str(e), "error_type": "model_error"}), 500
-
-    except Exception as e:
-        logger.exception("Unexpected error")
-        return jsonify({"success": False, "error": f"Unexpected error: {e}", "error_type": "unknown"}), 500
-
-
-@app.route("/download", methods=["POST"])
-def download():
-    data = request.get_json(silent=True)
-    if not isinstance(data, dict):
-        return jsonify({"error": "Request body must be a JSON object."}), 400
-    result = data.get("result", {})
-    meta   = data.get("meta", {})
-    if not isinstance(result, dict) or not isinstance(meta, dict):
-        return jsonify({"error": "Result and metadata must be JSON objects."}), 400
-
-    lines = [
-        "=" * 60,
-        "  LocalBiz AI – Social Media Post Generator",
-        "=" * 60,
-        f"Generated On : {datetime.now().strftime('%d %B %Y, %I:%M %p')}",
-        f"Business     : {_get_text(meta, 'business_name')}",
-        f"Product      : {_get_text(meta, 'product_name')}",
-        f"Platform     : {_get_text(meta, 'platform')}",
-        f"Language     : {_get_text(meta, 'language')}",
-        f"Tone         : {_get_text(meta, 'tone')}",
-        "",
-        "─" * 60,
-        "CAPTION",
-        "─" * 60,
-        _get_text(result, "caption"),
-        "",
-        "─" * 60,
-        "SHORT DESCRIPTION",
-        "─" * 60,
-        _get_text(result, "short_description"),
-        "",
-        "─" * 60,
-        "HASHTAGS",
-        "─" * 60,
-        _get_text(result, "hashtags"),
-        "",
-        "─" * 60,
-        "CALL TO ACTION",
-        "─" * 60,
-        _get_text(result, "call_to_action"),
-        "",
-        "─" * 60,
-        "WHATSAPP MESSAGE",
-        "─" * 60,
-        _get_text(result, "whatsapp_message"),
-        "",
-        "=" * 60,
-        "  Generated by LocalBiz AI",
-        "  https://github.com/your-username/LocalBiz-AI",
-        "=" * 60,
-    ]
-
-    content  = "\n".join(lines)
-    buf      = io.BytesIO(content.encode("utf-8"))
-    business_name = _get_text(meta, "business_name", "post")
-    business_slug = secure_filename(business_name) or "post"
-    filename = f"localbiz_ai_{business_slug}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-    return send_file(buf, as_attachment=True, download_name=filename,
-                     mimetype="text/plain; charset=utf-8")
-
-
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
-
-if __name__ == "__main__":
-    import sys, io
-    # Ensure stdout is UTF-8 on Windows so the banner prints correctly
-    if sys.stdout.encoding != "utf-8":
-        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-    print("\n" + "=" * 55)
-    print("  [*]  LocalBiz AI - Social Media Post Generator")
-    print("=" * 55)
-    print(f"  Ollama Host  : {OLLAMA_HOST}")
-    print(f"  Model        : {OLLAMA_MODEL}")
-    print(f"  App URL      : http://127.0.0.1:5000")
-    print("  Demo Mode    : Available (no Ollama needed)")
-    print("=" * 55 + "\n")
-    app.run(host="127.0.0.1", port=int(os.environ.get("PORT", "5000")), debug=False)
+<script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>

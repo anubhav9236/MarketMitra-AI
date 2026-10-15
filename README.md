@@ -36,6 +36,7 @@
 LocalBiz-AI/
 ├── app.py               # Flask backend + Ollama integration
 ├── requirements.txt     # Python dependencies
+├── render.yaml          # Render free demo deployment
 ├── .gitignore
 ├── README.md
 ├── templates/
@@ -247,6 +248,19 @@ http://127.0.0.1:5000
 
 ---
 
+## 🌍 Public Demo Deployment (Render)
+
+The included `render.yaml` deploys a public demo using Render's free web service. On this deployment, `DEMO_MODE_ONLY=true` forces sample output and disables Ollama calls. The deployed service cannot access Ollama running on your personal computer; real AI generation remains available when running the app locally with Ollama.
+
+1. Push this project to a **dedicated GitHub repository**. Do not push the parent `C:\Users\<YourName>` folder; it may contain unrelated personal files. Ensure `.venv/` stays excluded.
+2. In Render, choose **New + → Blueprint**, connect that repository, and select its `render.yaml`.
+3. Wait for the service deploy to finish. Render will provide a public `https://...onrender.com` URL.
+4. Open the URL and try **Generate Demo**.
+
+The demo is sample output, not AI-generated content. Set `DEMO_MODE_ONLY=false` only when deploying to a server where an Ollama instance is intentionally configured and reachable.
+
+---
+
 ## ⚙️ Configuration
 
 | Environment Variable | Default | Description |
@@ -254,6 +268,7 @@ http://127.0.0.1:5000
 | `OLLAMA_HOST`       | `http://localhost:11434` | Ollama server URL |
 | `OLLAMA_MODEL`      | `llama3.2:3b` | Model name (must be pulled) |
 | `OLLAMA_TIMEOUT`    | `120` | Seconds before timeout |
+| `DEMO_MODE_ONLY`    | `false` | Always serve sample output and never call Ollama when `true` |
 | `SECRET_KEY`        | *(auto)* | Flask session secret |
 
 Set them before running:
